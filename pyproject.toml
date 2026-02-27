@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nicegui-p360"
+version = "0.1.0"
+description = "A NiceGUI widget for 360° product spin viewers"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "nicegui>=2.0.0",
+]
+
+[project.optional-dependencies]
+pipeline = [
+    "rembg[gpu]",
+    "Pillow",
+]
+
+[project.scripts]
+p360-process = "nicegui_p360.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nicegui_p360*"]
+
+[tool.setuptools.package-data]
+nicegui_p360 = ["*.js"]
