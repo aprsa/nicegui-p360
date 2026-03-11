@@ -1,235 +1,326 @@
 export default {
-  template: `<div ref="container" :style="containerStyle"></div>`,
+  template: `
+    <div ref="container" :style="containerStyle">
+      <div ref="viewport" :style="viewportStyle"></div>
+    </div>
+  `,
 
   props: {
-    spriteSrc:       { type: String,  default: null },
-    framesSrc:       { type: Array,   default: null },
-
-    // geometry — null by default in sprite mode; read from XMP if so
-    frameCount:      { type: Number,  default: null },
-    cols:            { type: Number,  default: null },
-    frameWidth:      { type: Number,  default: null },
-    frameHeight:     { type: Number,  default: null },
-
-    // display & interaction:
-    displayWidth:    { type: Number,  default: 600 },
-    dragSensitivity: { type: Number,  default: 8 },
-    autoSpin:        { type: Number,  default: 0 },
-    background:      { type: String,  default: 'transparent' },
+    spriteSrc:        { type: String, default: null },
+    framesSrc:        { type: Array, default: null },
+    frameCount:       { type: Number, default: null },
+    cols:             { type: Number, default: null },
+    frameWidth:       { type: Number, default: null },
+    frameHeight:      { type: Number, default: null },
+    responsiveMargin: { type: Number, default: 0 },
+    dragSensitivity:  { type: Number, default: 8 },
+    autoSpin:         { type: Number, default: 0 },
+    background:       { type: String, default: 'transparent' },
+    containerPadding: { type: Number, default: 1 },
+    showBoundary:     { type: Boolean, default: false },
+    boundaryColor:    { type: String, default: '#ff3b30' },
+    boundaryWidth:    { type: Number, default: 1 },
   },
 
   data() {
     return {
-      // geometry (from props or XMP):
       resolvedFrameCount: null,
-      resolvedCols:       null,
-      resolvedFrameW:     null,
-      resolvedFrameH:     null,
-      ready:        false,   // true once geometry is known and images loaded
-
+      resolvedCols: null,
+      resolvedFrameW: null,
+      resolvedFrameH: null,
+      parentWidth: 0,
+      ready: false,
       currentFrame: 0,
-      isDragging:   false,
-      dragStartX:   0,
-      dragAccum:    0,
-      spinTimer:    null,
-      images:       [],      // sequence mode only
+      isDragging: false,
+      dragStartX: 0,
+      dragAccum: 0,
+      spinTimer: null,
+      images: [],
+      _canvas: null,
+      _ctx: null,
+      _resizeObs: null,
     };
   },
 
   computed: {
-    scale() {
-      return this.resolvedFrameW ? this.displayWidth / this.resolvedFrameW : 1;
+    outerWidth() {
+      return Math.max(1, Math.floor(this.parentWidth - this.responsiveMargin));
     },
-    displayHeight() {
-      return this.resolvedFrameH ? Math.round(this.resolvedFrameH * this.scale) : 0;
+    pad() {
+      return Math.max(0, this.containerPadding);
+    },
+    viewportWidth() {
+      return Math.max(1, this.outerWidth - 2 * this.pad);
+    },
+    scale() {
+      return this.resolvedFrameW ? this.viewportWidth / this.resolvedFrameW : 1;
+    },
+    viewportHeight() {
+      return this.resolvedFrameH ? Math.max(1, Math.round(this.resolvedFrameH * this.scale)) : 1;
+    },
+    outerHeight() {
+      return this.viewportHeight + 2 * this.pad;
     },
     spriteW() {
       return this.resolvedCols ? Math.round(this.resolvedFrameW * this.resolvedCols * this.scale) : 0;
     },
     spriteH() {
       if (!this.resolvedFrameCount || !this.resolvedCols || !this.resolvedFrameH) return 0;
-      return Math.round(this.resolvedFrameH * Math.ceil(this.resolvedFrameCount / this.resolvedCols) * this.scale);
+      const rows = Math.ceil(this.resolvedFrameCount / this.resolvedCols);
+      return Math.round(this.resolvedFrameH * rows * this.scale);
     },
     containerStyle() {
-      const base = {
-        width:           `${this.displayWidth}px`,
-        height:          `${this.displayHeight}px`,
+      return {
+        width: `${this.outerWidth}px`,
+        height: `${this.outerHeight}px`,
+        padding: `${this.pad}px`,
+        boxSizing: 'border-box',
         backgroundColor: this.background,
-        cursor:          this.isDragging ? 'grabbing' : 'grab',
-        userSelect:      'none',
-        visibility:      this.ready ? 'visible' : 'hidden',
+        overflow: 'hidden',
+        visibility: this.ready ? 'visible' : 'hidden',
       };
+    },
+    viewportStyle() {
+      const style = {
+        width: `${this.viewportWidth}px`,
+        height: `${this.viewportHeight}px`,
+        boxSizing: 'border-box',
+        userSelect: 'none',
+        touchAction: 'none',
+        cursor: this.isDragging ? 'grabbing' : 'grab',
+        backgroundRepeat: 'no-repeat',
+      };
+
+      if (this.showBoundary) {
+        style.border = `${Math.max(1, this.boundaryWidth)}px solid ${this.boundaryColor}`;
+      }
+
       if (this.spriteSrc && this.ready) {
         const col = this.currentFrame % this.resolvedCols;
         const row = Math.floor(this.currentFrame / this.resolvedCols);
-        return {
-          ...base,
-          backgroundImage:    `url('${this.spriteSrc}')`,
-          backgroundSize:     `${this.spriteW}px ${this.spriteH}px`,
-          backgroundPosition: `${-(col * this.displayWidth)}px ${-(row * this.displayHeight)}px`,
-          backgroundRepeat:   'no-repeat',
-        };
+        style.backgroundImage = `url('${this.spriteSrc}')`;
+        style.backgroundSize = `${this.spriteW}px ${this.spriteH}px`;
+        style.backgroundPosition = `${-(col * this.viewportWidth)}px ${-(row * this.viewportHeight)}px`;
       }
-      return base;
+
+      return style;
+    },
+  },
+
+  watch: {
+    viewportWidth() {
+      this._syncCanvasSize();
+    },
+    viewportHeight() {
+      this._syncCanvasSize();
     },
   },
 
   async mounted() {
-    // resolve geometry -- either passed explicitly or read from XMP in the sprite:
-    if (this.frameCount !== null && this.cols !== null &&
-        this.frameWidth !== null && this.frameHeight !== null) {
-      // if parameters are provided explicitly — use as-is:
-      this.resolvedFrameCount = this.frameCount;
-      this.resolvedCols       = this.cols;
-      this.resolvedFrameW     = this.frameWidth;
-      this.resolvedFrameH     = this.frameHeight;
-    } else if (this.spriteSrc) {
-      // otherwise read geometry from XMP embedded in the sprite:
-      const meta = await this._readXmp(this.spriteSrc);
-      this.resolvedFrameCount = this.frameCount  ?? meta.frame_count;
-      this.resolvedCols       = this.cols        ?? meta.cols;
-      this.resolvedFrameW     = this.frameWidth  ?? meta.frame_width;
-      this.resolvedFrameH     = this.frameHeight ?? meta.frame_height;
-    }
+    await this._resolveGeometry();
 
-    // load assets:
     if (this.spriteSrc) {
       await this._loadSprite();
     } else if (this.framesSrc) {
       this._canvas = document.createElement('canvas');
-      this._canvas.width  = this.displayWidth;
-      this._canvas.height = this.displayHeight;
-      this._canvas.style.cssText = `display:block;width:${this.displayWidth}px;height:${this.displayHeight}px;`;
-      this.$refs.container.appendChild(this._canvas);
+      this._canvas.style.display = 'block';
+      this.$refs.viewport.appendChild(this._canvas);
       this._ctx = this._canvas.getContext('2d');
       await this._loadSequence();
     }
 
+    this._setupResizeObserver();
+    this._syncCanvasSize();
+
     this.ready = true;
     if (this._ctx) this._drawFrame(0);
-    if (this.autoSpin > 0) this._startSpin();
+    if (this.autoSpin > 0 && this.resolvedFrameCount > 0) this._startSpin();
 
-    // event listeners:
-    this.$refs.container.addEventListener('mousedown',  this._onMouseDown);
-    window.addEventListener('mousemove', this._onMouseMove);
-    window.addEventListener('mouseup',   this._onMouseUp);
-    this.$refs.container.addEventListener('touchstart', this._onTouchStart, { passive: false });
-    window.addEventListener('touchmove',  this._onTouchMove, { passive: false });
-    window.addEventListener('touchend',   this._onTouchEnd);
+    this.$refs.viewport.addEventListener('pointerdown', this._onPointerDown);
+    window.addEventListener('pointermove', this._onPointerMove);
+    window.addEventListener('pointerup', this._onPointerUp);
   },
 
   beforeUnmount() {
-    window.removeEventListener('mousemove', this._onMouseMove);
-    window.removeEventListener('mouseup',   this._onMouseUp);
-    window.removeEventListener('touchmove', this._onTouchMove);
-    window.removeEventListener('touchend',  this._onTouchEnd);
+    this.$refs.viewport.removeEventListener('pointerdown', this._onPointerDown);
+    window.removeEventListener('pointermove', this._onPointerMove);
+    window.removeEventListener('pointerup', this._onPointerUp);
     this._stopSpin();
+    if (this._resizeObs) this._resizeObs.disconnect();
   },
 
   methods: {
-    // XMP inference:
+    async _resolveGeometry() {
+      if (
+        this.frameCount !== null &&
+        this.cols !== null &&
+        this.frameWidth !== null &&
+        this.frameHeight !== null
+      ) {
+        this.resolvedFrameCount = this.frameCount;
+        this.resolvedCols = this.cols;
+        this.resolvedFrameW = this.frameWidth;
+        this.resolvedFrameH = this.frameHeight;
+        return;
+      }
+
+      if (!this.spriteSrc) return;
+      const meta = await this._readXmp(this.spriteSrc);
+      this.resolvedFrameCount = this.frameCount ?? meta.frame_count ?? null;
+      this.resolvedCols = this.cols ?? meta.cols ?? null;
+      this.resolvedFrameW = this.frameWidth ?? meta.frame_width ?? null;
+      this.resolvedFrameH = this.frameHeight ?? meta.frame_height ?? null;
+    },
+
+    _setupResizeObserver() {
+      const target = this._pickResizeTarget();
+      const update = entries => {
+        const observed = entries && entries[0] ? entries[0].contentRect.width : target.clientWidth;
+        const width = Math.floor(observed);
+        if (width > 0) this.parentWidth = width;
+      };
+      this._resizeObs = new ResizeObserver(update);
+      this._resizeObs.observe(target);
+      update();
+      requestAnimationFrame(update);
+      setTimeout(update, 80);
+    },
+
+    _pickResizeTarget() {
+      const self = this.$el;
+      const card = self.closest('.q-card');
+      if (card) return card;
+
+      const selfWidth = Math.floor(self.getBoundingClientRect().width || 0);
+      let candidate = self.parentElement;
+      while (candidate && candidate !== document.body) {
+        const width = Math.floor(candidate.getBoundingClientRect().width || 0);
+        if (width > 0 && Math.abs(width - selfWidth) > 1) return candidate;
+        candidate = candidate.parentElement;
+      }
+      return self.parentElement || self;
+    },
+
+    _syncCanvasSize() {
+      if (!this._canvas || !this._ctx) return;
+      const width = this.viewportWidth;
+      const height = this.viewportHeight;
+      if (this._canvas.width !== width || this._canvas.height !== height) {
+        this._canvas.width = width;
+        this._canvas.height = height;
+      }
+      this._canvas.style.width = `${width}px`;
+      this._canvas.style.height = `${height}px`;
+      if (this.ready && this.images.length > 0) this._drawFrame(this.currentFrame);
+    },
+
     async _readXmp(url) {
       try {
-        const res    = await fetch(url);
-        const buf    = await res.arrayBuffer();
-        const bytes  = new Uint8Array(buf);
-        // XMP in WebP is a UTF-8 string chunk; find it by searching for the marker
+        const res = await fetch(url);
+        const buf = await res.arrayBuffer();
+        const text = new TextDecoder().decode(new Uint8Array(buf));
         const marker = '<x:xmpmeta';
-        const end    = '</x:xmpmeta>';
-        const text   = new TextDecoder().decode(bytes);
-        const start  = text.indexOf(marker);
+        const end = '</x:xmpmeta>';
+        const start = text.indexOf(marker);
         const finish = text.indexOf(end);
-        if (start === -1 || finish === -1) {
-          console.warn('nicegui-p360: no XMP metadata found in sprite.');
-          return {};
-        }
-        const xmp    = text.slice(start, finish + end.length);
+        if (start === -1 || finish === -1) return {};
+
+        const xmp = text.slice(start, finish + end.length);
         const fields = ['frame_count', 'cols', 'frame_width', 'frame_height'];
-        const meta   = {};
-        for (const f of fields) {
-          const m = xmp.match(new RegExp(`<p360:${f}>(\\d+)</p360:${f}>`));
-          if (m) meta[f] = parseInt(m[1]);
+        const meta = {};
+        for (const field of fields) {
+          const match = xmp.match(new RegExp(`<p360:${field}>(\\d+)</p360:${field}>`));
+          if (match) meta[field] = parseInt(match[1], 10);
         }
         return meta;
-      } catch (e) {
-        console.warn('nicegui-p360: failed to read XMP from sprite:', e);
+      } catch {
         return {};
       }
     },
 
-    // sprite loading:
     _loadSprite() {
       return new Promise(resolve => {
-        const img  = new Image();
+        const img = new Image();
         img.onload = resolve;
-        img.onerror = resolve; // don't hang on error
-        img.src    = this.spriteSrc;
+        img.onerror = resolve;
+        img.src = this.spriteSrc;
       });
     },
 
-    // sequence loading:
     _loadSequence() {
       return new Promise(resolve => {
         let loaded = 0;
         this.images = this.framesSrc.map(src => {
-          const img  = new Image();
-          img.onload = () => { if (++loaded === this.framesSrc.length) resolve(); };
-          img.onerror = () => { if (++loaded === this.framesSrc.length) resolve(); };
-          img.src    = src;
+          const img = new Image();
+          const done = () => {
+            loaded += 1;
+            if (loaded === this.framesSrc.length) resolve();
+          };
+          img.onload = done;
+          img.onerror = done;
+          img.src = src;
           return img;
         });
       });
     },
 
-    // frame widget actions:
-    showFrame(i) {
-      this.currentFrame = ((i % this.resolvedFrameCount) + this.resolvedFrameCount) % this.resolvedFrameCount;
+    showFrame(index) {
+      if (!this.resolvedFrameCount) return;
+      this.currentFrame = ((index % this.resolvedFrameCount) + this.resolvedFrameCount) % this.resolvedFrameCount;
       if (this._ctx) this._drawFrame(this.currentFrame);
     },
 
-    _drawFrame(i) {
-      if (!this.images[i]) return;
+    _drawFrame(index) {
+      const img = this.images[index];
+      if (!img) return;
       this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
-      this._ctx.drawImage(this.images[i], 0, 0, this._canvas.width, this._canvas.height);
+      this._ctx.drawImage(img, 0, 0, this._canvas.width, this._canvas.height);
     },
 
-    // spin control:
     _startSpin() {
       const msPerFrame = (60 * 1000) / (this.autoSpin * this.resolvedFrameCount);
       this.spinTimer = setInterval(() => this.showFrame(this.currentFrame + 1), msPerFrame);
     },
 
     _stopSpin() {
-      if (this.spinTimer) { clearInterval(this.spinTimer); this.spinTimer = null; }
+      if (!this.spinTimer) return;
+      clearInterval(this.spinTimer);
+      this.spinTimer = null;
     },
 
-    // drag control:
     _startDrag(clientX) {
       this._stopSpin();
       this.isDragging = true;
       this.dragStartX = clientX;
-      this.dragAccum  = 0;
+      this.dragAccum = 0;
     },
 
     _moveDrag(clientX) {
       if (!this.isDragging) return;
       this.dragAccum += clientX - this.dragStartX;
       this.dragStartX = clientX;
-      const steps = Math.trunc(this.dragAccum / this.dragSensitivity);
-      if (steps !== 0) {
-        this.showFrame(this.currentFrame + steps);
-        this.dragAccum -= steps * this.dragSensitivity;
-      }
+      const stepPx = Math.max(1, this.dragSensitivity);
+      const steps = Math.trunc(this.dragAccum / stepPx);
+      if (steps === 0) return;
+      this.showFrame(this.currentFrame + steps);
+      this.dragAccum -= steps * stepPx;
     },
 
-    _endDrag() { this.isDragging = false; },
+    _endDrag() {
+      this.isDragging = false;
+    },
 
-    _onMouseDown(e) { this._startDrag(e.clientX); e.preventDefault(); },
-    _onMouseMove(e) { this._moveDrag(e.clientX); },
-    _onMouseUp()    { this._endDrag(); },
+    _onPointerDown(event) {
+      this._startDrag(event.clientX);
+      event.preventDefault();
+    },
 
-    _onTouchStart(e) { this._startDrag(e.touches[0].clientX); e.preventDefault(); },
-    _onTouchMove(e)  { this._moveDrag(e.touches[0].clientX);  e.preventDefault(); },
-    _onTouchEnd()    { this._endDrag(); },
+    _onPointerMove(event) {
+      this._moveDrag(event.clientX);
+    },
+
+    _onPointerUp() {
+      this._endDrag();
+    },
   },
 };

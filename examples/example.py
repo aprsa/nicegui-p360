@@ -22,15 +22,18 @@ def index():
     with ui.column().classes('items-center justify-center min-h-screen gap-6'):
         ui.label('Soulie Ceramics').classes('text-2xl font-serif tracking-widest opacity-60')
 
-        # Sprite mode (recommended for production)
-        Viewer360(
-            sprite='/static/sprite.webp',
-            background='#f0e6d2',  # set to 'transparent' to show the page background
-            drag_sensitivity=8,
-            auto_spin=False,        # set e.g. 0.5 for half a rotation per second
-        )
+        with ui.card().classes('w-[600px] p-0'):
+            Viewer360(
+                sprite='/static/sprite.webp',
+                background='#ffffff',  # set to 'transparent' to show the page background
+                sprite_boundary=True,
+                boundary_color='#ff3b30',
+                boundary_width=1,
+                drag_sensitivity=8,
+                auto_spin=8,        # set e.g. 0.5 for half a rotation per second
+            )
 
         ui.label('← drag to rotate →').classes('text-xs tracking-widest uppercase opacity-30')
 
 
-ui.run(title='360° Viewer Example', port=8081)
+ui.run(title='360° Viewer Example', port=8082)

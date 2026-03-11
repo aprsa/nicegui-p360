@@ -26,7 +26,6 @@ class Viewer360(Element, component='viewer360.js'):
         Viewer360(
             sprite='/static/products/mug01/sprite.webp',
             frame_count=64,
-            display_width=600,
             auto_spin=0.5,
         )
 
@@ -51,8 +50,12 @@ class Viewer360(Element, component='viewer360.js'):
         frame_height: Optional[int] = None,
 
         # Display
-        display_width: int = 600,
         background: str = 'transparent',
+        responsive_margin: int = 0,
+        padding: int = 1,
+        sprite_boundary: bool = False,
+        boundary_color: str = '#ff3b30',
+        boundary_width: int = 1,
 
         # Interaction
         drag_sensitivity: int = 8,
@@ -68,8 +71,14 @@ class Viewer360(Element, component='viewer360.js'):
         :param cols: columns in sprite grid (auto-read from XMP in sprite mode)
         :param frame_width: frame width in sprite px (auto-read from XMP in sprite mode)
         :param frame_height: frame height in sprite px (auto-read from XMP in sprite mode)
-        :param display_width: rendered viewer width in pixels (height is auto-computed)
         :param background: CSS background color (default: 'transparent')
+        :param responsive_margin: total horizontal margin in pixels subtracted from
+            measured parent width (default: 0)
+        :param container_padding: inner spacing in pixels between container edge and
+            rendered image viewport (default: 1)
+        :param show_boundary: when True, draw a boundary around the rendered image area
+        :param boundary_color: CSS color used for the optional boundary
+        :param boundary_width: boundary width in pixels when show_boundary=True
         :param drag_sensitivity: pixels of drag per frame step (lower = more sensitive)
         :param auto_spin: rotation speed in RPM; 0 disables auto-spin
         """
@@ -96,7 +105,11 @@ class Viewer360(Element, component='viewer360.js'):
         self._props['frameWidth'] = frame_width
         self._props['frameHeight'] = frame_height
 
-        self._props['displayWidth'] = display_width
+        self._props['responsiveMargin'] = responsive_margin
+        self._props['containerPadding'] = padding
+        self._props['showBoundary'] = sprite_boundary
+        self._props['boundaryColor'] = boundary_color
+        self._props['boundaryWidth'] = boundary_width
         self._props['background'] = background
         self._props['dragSensitivity'] = drag_sensitivity
         self._props['autoSpin'] = auto_spin

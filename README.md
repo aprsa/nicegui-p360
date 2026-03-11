@@ -71,7 +71,6 @@ def index():
     Viewer360(
         sprite='/static/products/mug01/sprite.webp',
         frame_count=42,
-        display_width=600,
         background='transparent',
         drag_sensitivity=8,
         auto_spin=0.5,   # rpm; 0 disables
@@ -79,7 +78,7 @@ def index():
 
     # Sequence mode (individual frames)
     frames = [f'/static/products/mug01/frame_{i:03d}.webp' for i in range(1, 43)]
-    Viewer360(frames=frames, display_width=600)
+    Viewer360(frames=frames)
 
 ui.run()
 ```
@@ -94,7 +93,16 @@ ui.run()
 | `cols` | auto | Sprite grid columns (auto-computed for square-ish layout) |
 | `frame_width` | `800` | Frame width in sprite (px) |
 | `frame_height` | `450` | Frame height in sprite (px) |
-| `display_width` | `600` | Rendered viewer width (px) |
+| `responsive_margin` | `0` | Pixels subtracted from measured parent/container width |
+| `padding` | `1` | Inner spacing between viewport edge and rendered image |
+| `sprite_boundary` | `False` | Draw a boundary around the rendered image area |
+| `boundary_color` | `'#ff3b30'` | CSS color for the optional boundary |
+| `boundary_width` | `1` | Boundary width in pixels |
 | `background` | `'transparent'` | CSS background color |
 | `drag_sensitivity` | `8` | Pixels of drag per frame step |
 | `auto_spin` | `0.0` | Auto-spin speed in RPM (0 = disabled) |
+
+### Sizing behavior
+
+`Viewer360` always tracks the width of its parent container (for example, a `ui.card`).
+No fixed-width mode is applied in the component.
