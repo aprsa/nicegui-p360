@@ -34,6 +34,10 @@ export default {
       isDragging: false,
       dragStartX: 0,
       dragAccum: 0,
+      _touchId: null,
+      _touchOriginX: 0,
+      _touchOriginY: 0,
+      _touchMode: null,
       spinTimer: null,
       images: [],
       _canvas: null,
@@ -77,6 +81,7 @@ export default {
         boxSizing: 'border-box',
         backgroundColor: this.background,
         overflow: 'hidden',
+        touchAction: 'pan-y',
         visibility: this.ready ? 'visible' : 'hidden',
       };
     },
@@ -86,7 +91,7 @@ export default {
         height: `${this.viewportHeight}px`,
         boxSizing: 'border-box',
         userSelect: 'none',
-        touchAction: 'none',
+        touchAction: 'pan-y',
         cursor: this.isDragging ? 'grabbing' : 'grab',
         backgroundRepeat: 'no-repeat',
       };
@@ -136,15 +141,23 @@ export default {
     if (this._ctx) this._drawFrame(0);
     if (this.autoSpin > 0 && this.resolvedFrameCount > 0) this._startSpin();
 
-    this.$refs.viewport.addEventListener('pointerdown', this._onPointerDown);
-    window.addEventListener('pointermove', this._onPointerMove);
-    window.addEventListener('pointerup', this._onPointerUp);
+    this.$refs.viewport.addEventListener('mousedown', this._onMouseDown);
+    window.addEventListener('mousemove', this._onMouseMove);
+    window.addEventListener('mouseup', this._onMouseUp);
+    this.$refs.viewport.addEventListener('touchstart', this._onTouchStart, { passive: true });
+    this.$refs.viewport.addEventListener('touchmove', this._onTouchMove, { passive: true });
+    this.$refs.viewport.addEventListener('touchend', this._onTouchEnd);
+    this.$refs.viewport.addEventListener('touchcancel', this._onTouchEnd);
   },
 
   beforeUnmount() {
-    this.$refs.viewport.removeEventListener('pointerdown', this._onPointerDown);
-    window.removeEventListener('pointermove', this._onPointerMove);
-    window.removeEventListener('pointerup', this._onPointerUp);
+    this.$refs.viewport.removeEventListener('mousedown', this._onMouseDown);
+    window.removeEventListener('mousemove', this._onMouseMove);
+    window.removeEventListener('mouseup', this._onMouseUp);
+    this.$refs.viewport.removeEventListener('touchstart', this._onTouchStart);
+    this.$refs.viewport.removeEventListener('touchmove', this._onTouchMove);
+    this.$refs.viewport.removeEventListener('touchend', this._onTouchEnd);
+    this.$refs.viewport.removeEventListener('touchcancel', this._onTouchEnd);
     this._stopSpin();
     if (this._resizeObs) this._resizeObs.disconnect();
   },
@@ -288,15 +301,7 @@ export default {
       this.spinTimer = null;
     },
 
-    _startDrag(clientX) {
-      this._stopSpin();
-      this.isDragging = true;
-      this.dragStartX = clientX;
-      this.dragAccum = 0;
-    },
-
-    _moveDrag(clientX) {
-      if (!this.isDragging) return;
+    _applyDragDelta(clientX) {
       this.dragAccum += clientX - this.dragStartX;
       this.dragStartX = clientX;
       const stepPx = Math.max(1, this.dragSensitivity);
@@ -306,21 +311,72 @@ export default {
       this.dragAccum -= steps * stepPx;
     },
 
-    _endDrag() {
-      this.isDragging = false;
-    },
-
-    _onPointerDown(event) {
-      this._startDrag(event.clientX);
+    /* ---- Mouse (desktop) ---- */
+    _onMouseDown(event) {
+      this._stopSpin();
+      this.isDragging = true;
+      this.dragStartX = event.clientX;
+      this.dragAccum = 0;
       event.preventDefault();
     },
 
-    _onPointerMove(event) {
-      this._moveDrag(event.clientX);
+    _onMouseMove(event) {
+      if (!this.isDragging) return;
+      this._applyDragDelta(event.clientX);
     },
 
-    _onPointerUp() {
-      this._endDrag();
+    _onMouseUp() {
+      this.isDragging = false;
+    },
+
+    /* ---- Touch (mobile) ---- */
+    _findTouch(touchList, id) {
+      for (let i = 0; i < touchList.length; i++) {
+        if (touchList[i].identifier === id) return touchList[i];
+      }
+      return null;
+    },
+
+    _onTouchStart(event) {
+      if (this._touchId !== null) return;
+      const t = event.changedTouches[0];
+      this._touchId = t.identifier;
+      this._touchOriginX = t.clientX;
+      this._touchOriginY = t.clientY;
+      this._touchMode = null;
+      this._stopSpin();
+    },
+
+    _onTouchMove(event) {
+      const t = this._findTouch(event.changedTouches, this._touchId);
+      if (!t) return;
+
+      if (this._touchMode === null) {
+        const dx = t.clientX - this._touchOriginX;
+        const dy = t.clientY - this._touchOriginY;
+        // Slight horizontal bias so touch rotation engages sooner.
+        if (Math.abs(dx) > Math.abs(dy) * 0.85) {
+          this._touchMode = 'rotate';
+          this.isDragging = true;
+          this.dragStartX = t.clientX;
+          this.dragAccum = dx;
+        } else {
+          this._touchMode = 'scroll';
+          return;
+        }
+      }
+
+      if (this._touchMode === 'rotate') {
+        this._applyDragDelta(t.clientX);
+      }
+    },
+
+    _onTouchEnd(event) {
+      const t = this._findTouch(event.changedTouches, this._touchId);
+      if (!t) return;
+      this._touchId = null;
+      this._touchMode = null;
+      this.isDragging = false;
     },
   },
 };
